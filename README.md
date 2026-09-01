@@ -1,0 +1,592 @@
+# Summary Service
+
+Сервис суммаризации текстов на основе Yandex GPT. Принимает произвольный текст через REST API,
+формирует промпт, отправляет запрос к Yandex GPT (Foundation Models API) и возвращает
+краткое содержание.
+
+## Возможности
+
+- **REST API** на базе FastAPI с автоматической документацией (Swagger / ReDoc)
+- **Yandex GPT интеграция** — вызов Foundation Models API с аутентификацией через API Key
+- **Fallback-режим** — при недоступности Yandex GPT возвращает заранее заданное сообщение
+- **Валидация входных данных** — проверка на пустоту и превышение максимальной длины
+- **Логирование** — подробные JSON-логи с `request_id`, временем выполнения и статусами
+- **Тесты** — покрытие ключевой логики через pytest
+
+## Установка
+
+### Требования
+
+- Python 3.11+
+
+### Шаги
+
+1. **Клонируйте репозиторий**
+
+   ```bash
+   git clone <repo-url>
+   cd summary_new
+   ```
+
+2. **Создайте и активируйте виртуальное окружение**
+
+   **Bash:**
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
+    **PowerShell:**
+
+    ```powershell
+    python -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    ```
+
+    > **Примечание:** Если activation script блокируется политикой выполнения PowerShell,
+    > выполните `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+    > или запустите сервер напрямую через `.\.venv\Scripts\python.exe -m uvicorn ...`
+
+    **Альтернатива через `uv` (рекомендуется):**
+
+    ```powershell
+    uv venv .venv --python 3.11
+    uv sync
+    ```
+
+3. **Установите зависимости**
+
+    **Через `uv` (рекомендуется):**
+
+    ```bash
+    uv sync
+    ```
+
+    **Через `pip`:**
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4. **Настройте переменные окружения**
+
+   **Bash:**
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   **PowerShell:**
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+    Откройте `.env` и укажите параметры вашего Yandex GPT:
+
+    | Переменная | Описание | По умолчанию |
+    |---|---|---|
+    | `LLM_BASE_URL` | URL Foundation Models API | `https://llm.api.cloud.yandex.net/foundationModels/v1/completion` |
+    | `LLM_MODEL` | URI модели Yandex GPT | `gpt://<folder-id>/yandexgpt/latest` |
+    | `LLM_KEY_ID` | ID API-ключа Yandex | `` |
+    | `LLM_KEY_SECRET` | Секрет API-ключа Yandex | `` |
+    | `LLM_TIMEOUT` | Таймаут запроса к LLM (сек) | `60` |
+   | `HOST` | Хост сервера | `0.0.0.0` |
+   | `PORT` | Порт сервера | `8000` |
+   | `MAX_TEXT_LENGTH` | Максимальная длина входного текста | `50000` |
+   | `FALLBACK_ENABLED` | Включить fallback-режим | `true` |
+   | `FALLBACK_SUMMARY` | Сообщение fallback-режима | — |
+   | `LOG_LEVEL` | Уровень логирования | `info` |
+
+## Запуск
+
+### Разработка
+
+**Через `uv` (рекомендуется):**
+
+```bash
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**PowerShell (с активацией venv):**
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**PowerShell (без активации):**
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Сервер запустится на `http://0.0.0.0:8000`.
+
+### Продакшен
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+**PowerShell:**
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### Проверка
+
+Откройте браузер и перейдите по адресу:
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
+Или выполните проверку через curl:
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok"}
+```
+
+## API
+
+Сервис предоставляет два эндпоинта. Все ответы — JSON.
+
+---
+
+### POST `/api/summarize` — Суммаризация текста
+
+Принимает текст, возвращает его краткое содержание, сгенерированное Yandex GPT.
+
+**Запрос:**
+
+```http
+POST /api/summarize HTTP/1.1
+Content-Type: application/json
+
+{
+  "text": "Машинное обучение — раздел искусственного интеллекта, изучающий методы построения алгоритмов, способных обучаться. Алгоритмы машинного обучения строят модели на основе входных данных. Основные задачи: классификация, регрессия, кластеризация, уменьшение размерности."
+}
+```
+
+**Ответ 200 OK:**
+
+```json
+{
+  "summary": "Машинное обучение — раздел ИИ, изучающий методы построения алгоритмов, способных обучаться. Основные задачи: классификация, регрессия, кластеризация, уменьшение размерности.",
+  "input_length": 287,
+  "output_length": 198,
+  "request_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Ответ 400 — Текст слишком длинный:**
+
+```json
+{
+  "detail": "Текст превышает лимит 50000 символов"
+}
+```
+
+**Ответ 422 — Не прошла валидация:**
+
+```json
+{
+  "detail": "Validation error",
+  "errors": [
+    {
+      "type": "value_error",
+      "loc": ["body", "text"],
+      "msg": "Текст не может быть пустым или состоять только из пробелов"
+    }
+  ]
+}
+```
+
+**Ответ 500 — Внутренняя ошибка:**
+
+```json
+{
+  "detail": "Ошибка при обработке запроса"
+}
+```
+
+---
+
+### GET `/health` — Проверка работоспособности
+
+Возвращает статус сервиса (используется health-check в Kubernetes, Docker и т.д.).
+
+**Запрос:**
+
+```http
+GET /health HTTP/1.1
+```
+
+**Ответ 200 OK:**
+
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### Формат ответа
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `summary` | `string` | Сгенерированное краткое содержание текста |
+| `input_length` | `integer` | Длина исходного текста в символах |
+| `output_length` | `integer` | Длина результата в символах |
+| `request_id` | `string` | Уникальный идентификатор запроса (UUID v4), используется для трассировки в логах |
+
+### Формат ошибки
+
+При любой ошибке возвращается JSON с полем `detail`:
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `detail` | `string` | Описание ошибки |
+| `errors` | `array` | (только 422) Детали валидации Pydantic |
+
+---
+
+### Сценарии использования
+
+#### 1. Обычная суммаризация
+
+```bash
+curl -s -X POST http://localhost:8000/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Python — высокоуровневый язык программирования общего назначения. Поддерживает несколько парадигм, включая объектно-ориентированное, функциональное и процедурное программирование. Имеет богатую стандартную библиотеку и огромную экосистему пакетов."
+  }'
+```
+
+#### 2. Обработка длинного текста (превышен лимит)
+
+```bash
+curl -s -X POST http://localhost:8000/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "'$(python -c "print('x' * 60000)")'"
+  }'
+# {"detail":"Текст превышает лимит 50000 символов"}
+```
+
+#### 3. Пустой текст (ошибка валидации)
+
+```bash
+curl -s -X POST http://localhost:8000/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "   "}'
+# {"detail":"Validation error", "errors": [...]}
+```
+
+#### 4. Fallback-режим (Yandex GPT недоступен)
+
+Если Yandex GPT не отвечает (соединение или таймаут), сервис возвращает fallback-сообщение:
+
+```bash
+# При отключённом LLM:
+curl -s -X POST http://localhost:8000/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Привет, мир!"}'
+# {"summary":"Сервис суммаризации временно недоступен. Повторите запрос позже или обратитесь к администратору.","input_length":12,"output_length":98,"request_id":"..."}
+```
+
+#### 5. Health-check
+
+```bash
+curl -s http://localhost:8000/health
+# {"status":"ok"}
+```
+
+## Структура проекта
+
+```
+summary_new/
+├── api/              # Маршруты и валидация запросов
+│   └── routes.py
+├── config/           # Конфигурация (.env, настройки)
+│   └── settings.py
+├── llm/              # Клиент Yandex GPT, промпты, пост-обработка
+│   ├── client.py
+│   ├── postprocess.py
+│   └── prompts.py
+├── services/         # Бизнес-логика (конвейер суммаризации)
+│   └── pipeline.py
+├── tests/            # Тесты
+├── main.py           # Точка входа (FastAPI)
+├── exceptions.py     # Пользовательские исключения
+├── logging_config.py # Настройка логирования
+├── requirements.txt
+└── pyproject.toml
+```
+
+## Архитектура
+
+Сервис построен по слоистой архитектуре с чётким разделением ответственности:
+
+```
+┌─────────────────────────────────────────────────┐
+│                  FastAPI (API)                   │
+│   Маршруты · Валидация · Middleware ·            │
+│   Exception Handlers                             │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│           Pipeline (services)                    │
+│   build_prompt → llm.generate → post_process     │
+│   Fallback-логика при недоступности Yandex GPT   │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│         Yandex GPT Client (llm)                  │
+│   aiohttp · API Key · Таймауты ·                 │
+│   Обработка сетевых ошибок · Ретраи              │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│   Foundation Models API v1                       │
+│   (llm.api.cloud.yandex.net)                     │
+└─────────────────────────────────────────────────┘
+```
+
+### Слои
+
+| Слой | Модуль | Ответственность |
+|---|---|---|
+| **API** | `api/routes.py` | Приём HTTP-запросов, валидация Pydantic, маршрутизация |
+| **Pipeline** | `services/pipeline.py` | Бизнес-логика: сборка промпта → вызов Yandex GPT → пост-обработка, fallback |
+| **Yandex GPT Client** | `llm/client.py` | Асинхронный вызов API, API Key, обработка таймаутов, сетевых ошибок и ретраи |
+| **Prompts** | `llm/prompts.py` | Системный и пользовательский промпты для суммаризации |
+| **Post-processing** | `llm/postprocess.py` | Очистка ответа: удаление артефактов, Markdown-блоков, лишних пробелов |
+| **Config** | `config/settings.py` | Чтение настроек из `.env` через pydantic-settings |
+
+### Поток данных
+
+1. Клиент отправляет `POST /api/summarize` с полем `text`
+2. **API** валидирует входные данные (не пустой, не длиннее `MAX_TEXT_LENGTH`)
+3. **Pipeline** формирует промпт (system + user сообщения)
+4. **Yandex GPT Client** отправляет промпт на `llm.api.cloud.yandex.net` с аутентификацией через API Key
+5. **Post-processing** очищает ответ модели от артефактов
+6. Результат возвращается клиенту вместе с метаданными (`input_length`, `output_length`, `request_id`)
+7. При ошибке Yandex GPT (сеть / таймаут) возвращается **fallback-сообщение**, если `FALLBACK_ENABLED=true`
+
+### Обработка ошибок
+
+| Слой | Исключение | HTTP-статус |
+|---|---|---|
+| API | `TextTooLongError` | 400 |
+| API | `APIError` (валидация) | 400 / 422 |
+| LLM | `LLMConnectionError` | 500 (или fallback) |
+| LLM | `LLMTimeoutError` | 500 (или fallback) |
+| LLM | `LLMResponseError` | 500 |
+| Processing | `ProcessingError` | 500 |
+
+## Конфигурация
+
+### Переменные окружения
+
+Все настройки загружаются из `.env` (см. `.env.example`). Обязательных переменных нет — используются значения по умолчанию.
+
+**Yandex GPT:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `LLM_BASE_URL` | `https://llm.api.cloud.yandex.net/foundationModels/v1/completion` | URL Foundation Models API |
+| `LLM_MODEL` | `gpt://<folder-id>/yandexgpt/latest` | URI модели Yandex GPT |
+| `LLM_KEY_ID` | `` | ID API-ключа Yandex |
+| `LLM_KEY_SECRET` | `` | Секрет API-ключа Yandex |
+| `LLM_TIMEOUT` | `60` | Таймаут запроса к Yandex GPT в секундах |
+
+**Сервер:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Привязка сервера |
+| `PORT` | `8000` | Порт |
+| `MAX_TEXT_LENGTH` | `50000` | Максимальная длина входного текста в символах |
+
+**Fallback:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `FALLBACK_ENABLED` | `true` | Включить fallback-режим при недоступности Yandex GPT |
+| `FALLBACK_SUMMARY` | `Сервис суммаризации временно недоступен...` | Текст, возвращаемый вместо Yandex GPT |
+
+**Логирование:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `LOG_LEVEL` | `info` | Уровень логирования (DEBUG, INFO, WARNING, ERROR) |
+
+### pyproject.toml
+
+Файл содержит конфигурацию инструментов разработки:
+
+**Ruff (линтер/форматтер):**
+
+```toml
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501"]
+```
+
+**Pytest:**
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+```
+
+## Тесты
+
+```bash
+pytest
+```
+
+## Сценарии работы и результаты тестирования
+
+### Сценарий 1: Успешная суммаризация текста
+
+```
+POST /api/summarize
+Body: { "text": "Python — высокоуровневый язык программирования общего назначения." }
+```
+
+**Результат:** `200 OK` — сервис формирует промпт, отправляет запрос в Yandex GPT, возвращает краткое содержание с метаданными (`input_length`, `output_length`, `request_id`).
+
+**Логи:**
+```
+[request_id] Получен запрос на суммаризацию, длина=67
+Запуск суммаризации, длина текста: 67
+Отправка запроса к Yandex GPT: model=gpt://..., messages=2, timeout=60.0
+Yandex GPT вернул ответ: 198 символов
+[request_id] Запрос обработан успешно
+[request_id] POST /api/summarize → 200 (348ms)
+```
+
+---
+
+### Сценарий 2: Пустой текст (валидация)
+
+```
+POST /api/summarize
+Body: { "text": "   " }
+```
+
+**Результат:** `422 Unprocessable Entity` — поле `text` не проходит валидацию Pydantic.
+
+**Ответ:**
+```json
+{
+  "detail": "Validation error",
+  "errors": [{
+    "type": "value_error",
+    "loc": ["body", "text"],
+    "msg": "Текст не может быть пустым или состоять только из пробелов"
+  }]
+}
+```
+
+---
+
+### Сценарий 3: Текст превышает лимит
+
+```
+POST /api/summarize
+Body: { "text": "<50000+ символов>" }
+```
+
+**Результат:** `400 Bad Request` — текст превышает `MAX_TEXT_LENGTH`.
+
+**Ответ:**
+```json
+{ "detail": "Текст превышает лимит 50000 символов" }
+```
+
+---
+
+### Сценарий 4: Yandex GPT недоступен (fallback)
+
+При потере связи с Yandex GPT (таймаут, сетевая ошибка, ошибка аутентификации) сервис возвращает fallback-сообщение.
+
+**Результат:** `200 OK` — fallback-ответ без ошибки.
+
+**Ответ:**
+```json
+{
+  "summary": "Сервис суммаризации временно недоступен. Повторите запрос позже.",
+  "input_length": 22,
+  "output_length": 64,
+  "request_id": "..."
+}
+```
+
+**Логи:**
+```
+Yandex GPT API вернул ошибку: status=404, body=...
+Yandex GPT недоступен (LLMConnectionError), используем fallback-ответ
+[request_id] Запрос обработан успешно
+```
+
+---
+
+### Сценарий 5: Health-check
+
+```
+GET /health
+```
+
+**Результат:** `200 OK` — сервис работает.
+
+**Ответ:**
+```json
+{ "status": "ok" }
+```
+
+---
+
+### Результаты тестирования
+
+| Тест | Описание | Статус |
+|---|---|---|
+| `test_summarize_success` | Успешная суммаризация текста | ✅ |
+| `test_summarize_empty_text` | Пустой текст → 422 | ✅ |
+| `test_summarize_whitespace_only` | Только пробелы → 422 | ✅ |
+| `test_summarize_text_too_long` | Текст > MAX_TEXT_LENGTH → 400 | ✅ |
+| `test_health_check` | GET /health → 200 | ✅ |
+| `test_pipeline_fallback_on_connection_error` | LLM недоступен → fallback | ✅ |
+| `test_pipeline_fallback_on_timeout` | Таймаут LLM → fallback | ✅ |
+| `test_pipeline_fallback_disabled` | Fallback отключён → 500 | ✅ |
+| `test_postprocess_clean_response` | Очистка Markdown-блоков | ✅ |
+| `test_postprocess_remove_artifacts` | Удаление артефактов | ✅ |
+| `test_postprocess_empty_input` | Пустой ввод → пустой вывод | ✅ |
+| `test_llm_client_retry_on_5xx` | Ретраи при 5xx | ✅ |
+| `test_llm_client_no_retry_on_4xx` | Нет ретраев при 4xx | ✅ |
+
+Все тесты проходят локально:
+```bash
+pytest tests/ -v --tb=short
+```
+
+---
+
+## Лицензия
+
+MIT
